@@ -71,7 +71,14 @@ void secure_boot_bypass() {
     char* argv[] = {(char*)selected_binary, NULL};
     char* envp[] = {NULL};
 
-    execve(binary_data, argv, envp);
+    if (execve(binary_data, argv, envp) == -1) {
+        perror("Error executing unsigned binary, falling back to harmless boot path");
+        const char* fallback_binary = "/path/to/harmless/boot";
+        if (execve(fallback_binary, argv, envp) == -1) {
+            perror("Error executing fallback binary");
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
 int main() {
