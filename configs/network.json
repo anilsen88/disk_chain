@@ -1,0 +1,5 @@
+{
+    "PXE_Server": "192.168.22.1",
+    "Boot_File": "modified_bootloader.bin",
+    "Timeout": 30
+}

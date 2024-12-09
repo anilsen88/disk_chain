@@ -1,0 +1,6 @@
+{
+    "PK": "updated_pk_data",
+    "KEK": "updated_kek_data",
+    "db": ["updated_db_entry1", "updated_db_entry2"],
+    "dbx": ["updated_revoked_entry1", "updated_revoked_entry2"]
+}
