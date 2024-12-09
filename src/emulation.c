@@ -6,45 +6,47 @@
 #define NVRAM_SIZE 1024
 #define DB_NAME "nvram.db"
 
-static sqlite3 *db;
-char nvram[NVRAM_SIZE];
+typedef struct {
+    sqlite3 *db;
+    char nvram[NVRAM_SIZE];
+} NVRAMContext;
 
-void init_nvram() {
-    if (sqlite3_open(DB_NAME, &db) != SQLITE_OK) {
-        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+void init_nvram(NVRAMContext *context) {
+    if (sqlite3_open(DB_NAME, &context->db) != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(context->db));
         exit(1);
     }
     const char *sql = "CREATE TABLE IF NOT EXISTS nvram (name TEXT PRIMARY KEY, value TEXT, version INTEGER);";
     char *err_msg = 0;
-    if (sqlite3_exec(db, sql, 0, 0, &err_msg) != SQLITE_OK) {
+    if (sqlite3_exec(context->db, sql, 0, 0, &err_msg) != SQLITE_OK) {
         fprintf(stderr, "SQL error: %s\n", err_msg);
         sqlite3_free(err_msg);
     }
 }
 
-void set_nvram_variable(const char* name, const char* value) {
+void set_nvram_variable(NVRAMContext *context, const char* name, const char* value) {
     const char *sql = "INSERT OR REPLACE INTO nvram (name, value, version) VALUES (?, ?, (SELECT IFNULL(MAX(version), 0) + 1 FROM nvram WHERE name = ?));";
     sqlite3_stmt *stmt;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) != SQLITE_OK) {
-        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+    if (sqlite3_prepare_v2(context->db, sql, -1, &stmt, 0) != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(context->db));
         return;
     }
     sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, value, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, name, -1, SQLITE_STATIC);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
-        fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(db));
+        fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(context->db));
     }
     sqlite3_finalize(stmt);
     log_nvram_access(name, "set");
 }
 
-const char* get_nvram_variable(const char* name) {
+const char* get_nvram_variable(NVRAMContext *context, const char* name) {
     const char *sql = "SELECT value FROM nvram WHERE name = ?;";
     sqlite3_stmt *stmt;
     const char *value = NULL;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) != SQLITE_OK) {
-        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+    if (sqlite3_prepare_v2(context->db, sql, -1, &stmt, 0) != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(context->db));
         return NULL;
     }
     sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
@@ -60,11 +62,11 @@ void log_nvram_access(const char* name, const char* action) {
     printf("%s variable '%s' accessed.\n", action, name);
 }
 
-void rollback_nvram() {
+void rollback_nvram(NVRAMContext *context) {
     const char *sql = "SELECT name, value, version FROM nvram ORDER BY version DESC;";
     sqlite3_stmt *stmt;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) != SQLITE_OK) {
-        fprintf(stderr, "Failed to prepare statement for rollback: %s\n", sqlite3_errmsg(db));
+    if (sqlite3_prepare_v2(context->db, sql, -1, &stmt, 0) != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement for rollback: %s\n", sqlite3_errmsg(context->db));
         return;
     }
 
@@ -74,15 +76,16 @@ void rollback_nvram() {
         int version = sqlite3_column_int(stmt, 2);
 
         printf("Rolling back variable '%s' to version %d with value: %s\n", name, version, value);
-        set_nvram_variable(name, value);
+        set_nvram_variable(context, name, value);
     }
 
     sqlite3_finalize(stmt);
 }
 
 void emulate_nvram() {
-    init_nvram();
-    memset(nvram, 0, NVRAM_SIZE);
+    NVRAMContext context; // Create NVRAMContext instance
+    init_nvram(&context);
+    memset(context.nvram, 0, NVRAM_SIZE);
     printf("NVRAM emulation initialized.\n");
     UINTN attributes = 0;
     EFI_GUID variable_guid = EFI_GLOBAL_VARIABLE_GUID;
@@ -90,8 +93,8 @@ void emulate_nvram() {
         "SetupMode",
         &variable_guid,
         attributes,
-        sizeof(nvram),
-        nvram
+        sizeof(context.nvram),
+        context.nvram
     );
 
     if (EFI_ERROR(status)) {
@@ -126,13 +129,13 @@ void emulate_nvram() {
                     printf("Error: Data size %u exceeds NVRAM size %u.\n", data_size, NVRAM_SIZE);
                     exit(1);
                 }
-                memcpy(nvram, data, data_size);
+                memcpy(context.nvram, data, data_size);
                 attributes |= EFI_VARIABLE_BOOTSERVICE_ACCESS;
                 attributes |= EFI_VARIABLE_RUNTIME_ACCESS;
                 attributes |= EFI_VARIABLE_NON_VOLATILE;
                 attributes &= ~EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS;
                 printf("Modified variable attributes to %u.\n", attributes);
-                set_nvram_variable("SetupMode", nvram);
+                set_nvram_variable(&context, "SetupMode", context.nvram);
                 break;
             }
         }
