@@ -16,7 +16,7 @@ void init_nvram(NVRAMContext *context) {
         fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(context->db));
         exit(1);
     }
-    const char *sql = "CREATE TABLE IF NOT EXISTS nvram (name TEXT PRIMARY KEY, value TEXT, version INTEGER);";
+    const char *sql = "CREATE TABLE IF NOT EXISTS nvram (name TEXT PRIMARY KEY, value BLOB, version INTEGER);";
     char *err_msg = 0;
     if (sqlite3_exec(context->db, sql, 0, 0, &err_msg) != SQLITE_OK) {
         fprintf(stderr, "SQL error: %s\n", err_msg);
@@ -83,7 +83,7 @@ void rollback_nvram(NVRAMContext *context) {
 }
 
 void emulate_nvram() {
-    NVRAMContext context; // Create NVRAMContext instance
+    NVRAMContext context; 
     init_nvram(&context);
     memset(context.nvram, 0, NVRAM_SIZE);
     printf("NVRAM emulation initialized.\n");
