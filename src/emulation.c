@@ -24,7 +24,7 @@ void init_nvram(NVRAMContext *context) {
     }
 }
 
-void set_nvram_variable(NVRAMContext *context, const char* name, const char* value) {
+void set_nvram_variable(NVRAMContext *context, const char* name, const void* value, size_t value_size) {
     const char *sql = "INSERT OR REPLACE INTO nvram (name, value, version) VALUES (?, ?, (SELECT IFNULL(MAX(version), 0) + 1 FROM nvram WHERE name = ?));";
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(context->db, sql, -1, &stmt, 0) != SQLITE_OK) {
@@ -32,7 +32,7 @@ void set_nvram_variable(NVRAMContext *context, const char* name, const char* val
         return;
     }
     sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, value, -1, SQLITE_STATIC);
+    sqlite3_bind_blob(stmt, 2, value, value_size, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, name, -1, SQLITE_STATIC);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
         fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(context->db));
@@ -41,17 +41,21 @@ void set_nvram_variable(NVRAMContext *context, const char* name, const char* val
     log_nvram_access(name, "set");
 }
 
-const char* get_nvram_variable(NVRAMContext *context, const char* name) {
-    const char *sql = "SELECT value FROM nvram WHERE name = ?;";
+const void* get_nvram_variable(NVRAMContext *context, const char* name, size_t *value_size) {
+    const char *sql = "SELECT value, length(value) FROM nvram WHERE name = ?;";
     sqlite3_stmt *stmt;
-    const char *value = NULL;
+    void *value = NULL;
     if (sqlite3_prepare_v2(context->db, sql, -1, &stmt, 0) != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(context->db));
         return NULL;
     }
     sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
-        value = (const char*)sqlite3_column_text(stmt, 0);
+        *value_size = sqlite3_column_bytes(stmt, 0);
+        value = malloc(*value_size);
+        if (value) {
+            memcpy(value, sqlite3_column_blob(stmt, 0), *value_size);
+        }
     }
     sqlite3_finalize(stmt);
     log_nvram_access(name, "get");
@@ -76,7 +80,7 @@ void rollback_nvram(NVRAMContext *context) {
         int version = sqlite3_column_int(stmt, 2);
 
         printf("Rolling back variable '%s' to version %d with value: %s\n", name, version, value);
-        set_nvram_variable(context, name, value);
+        set_nvram_variable(context, name, value, strlen(value));
     }
 
     sqlite3_finalize(stmt);
@@ -135,7 +139,7 @@ void emulate_nvram() {
                 attributes |= EFI_VARIABLE_NON_VOLATILE;
                 attributes &= ~EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS;
                 printf("Modified variable attributes to %u.\n", attributes);
-                set_nvram_variable(&context, "SetupMode", context.nvram);
+                set_nvram_variable(&context, "SetupMode", context.nvram, data_size);
                 break;
             }
         }
